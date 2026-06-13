@@ -17,27 +17,33 @@ if TYPE_CHECKING:
 Connection = object
 
 
-def _create_connection() -> Connection:
-    if settings.mock_mode:
-        return MockConnection(**settings.connection_params())
-    try:
-        from pyrfc import Connection as RealConnection
-        return RealConnection(**settings.connection_params())
-    except ImportError as exc:
-        raise RuntimeError(
-            "pyrfc is not installed. Install with: uv pip install 'sap-mcp[sap]' "
-            "or set SAP_MOCK_MODE=true"
-        ) from exc
-
-
 class ConnectionManager:
-    """Thread-safe connection pool for SAP RFC connections."""
+    """Thread-safe connection pool for SAP RFC connections.
 
-    def __init__(self, pool_size: int | None = None) -> None:
-        self._pool_size = pool_size or settings.connection_pool_size
+    Each manager is bound to one SAP system config (a country). The config only
+    needs `mock_mode`, `connection_params()` and `connection_pool_size` — both
+    SAPSettings and SAPConfig satisfy this. Defaults to the env `settings`
+    singleton for backward compatibility (stdio mode / tests).
+    """
+
+    def __init__(self, config=None, pool_size: int | None = None) -> None:
+        self._config = config or settings
+        self._pool_size = pool_size or self._config.connection_pool_size
         self._pool: deque[Connection] = deque()
         self._lock = threading.Lock()
         self._created = 0
+
+    def _create_connection(self) -> Connection:
+        if self._config.mock_mode:
+            return MockConnection(**self._config.connection_params())
+        try:
+            from pyrfc import Connection as RealConnection
+            return RealConnection(**self._config.connection_params())
+        except ImportError as exc:
+            raise RuntimeError(
+                "pyrfc is not installed. Install with: uv pip install 'sap-mcp[sap]' "
+                "or set SAP_MOCK_MODE=true"
+            ) from exc
 
     @contextmanager
     def acquire(self) -> Generator[Connection, None, None]:
@@ -59,7 +65,7 @@ class ConnectionManager:
 
             if self._created < self._pool_size:
                 self._created += 1
-                return _create_connection()
+                return self._create_connection()
 
         # Pool exhausted — block until one is returned (simple spin)
         import time
@@ -72,7 +78,7 @@ class ConnectionManager:
                     self._created -= 1
                 if self._created < self._pool_size:
                     self._created += 1
-                    return _create_connection()
+                    return self._create_connection()
             time.sleep(0.05)
 
     def _checkin(self, conn: Connection) -> None:

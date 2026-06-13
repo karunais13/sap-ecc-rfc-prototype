@@ -6,10 +6,11 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from sap_mcp.connection.manager import pool
+from sap_mcp.connection.manager import pool as default_pool
+from sap_mcp.connection.manager import ConnectionManager
 
 
-def register(mcp: FastMCP) -> None:
+def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
 
     @mcp.tool()
     def describe_rfc(function_name: str) -> dict:

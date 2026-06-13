@@ -14,3 +14,10 @@ venv/
 .ruff_cache/
 *.so
 *.dylib
+
+# SAP NWRFC SDK — license-restricted, do not commit
+nwrfcsdk.tar.gz
+.DS_Store
+
+# Per-country SAP credentials (mounted at runtime) — keep the .sample only
+countries.json

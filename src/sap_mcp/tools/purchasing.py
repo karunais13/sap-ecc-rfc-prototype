@@ -8,14 +8,15 @@ from mcp.server.fastmcp import FastMCP
 
 from sap_mcp.bapi.return_handler import parse_return
 from sap_mcp.bapi.transaction import execute_bapi_with_commit
-from sap_mcp.connection.manager import pool
+from sap_mcp.connection.manager import pool as default_pool
+from sap_mcp.connection.manager import ConnectionManager
 
 
 def _pad_po(number: str) -> str:
     return number.zfill(10)
 
 
-def register(mcp: FastMCP) -> None:
+def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
 
     @mcp.tool()
     def get_purchase_order(purchase_order_number: str) -> dict:

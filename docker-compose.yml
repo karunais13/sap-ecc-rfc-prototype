@@ -1,0 +1,25 @@
+# Runs the published image directly (no local build).
+#
+#   cp countries.sample.json countries.json   # then edit per-country SAP settings
+#   docker compose up -d
+#
+# Each country in countries.json is served at:  http://<server-ip>:8000/mcp/{code}
+# Health/discovery:                             http://<server-ip>:8000/healthz
+services:
+  sap-mcp:
+    image: karunais13/sap-rfc-mcp:latest
+    container_name: sap-ecc-rfc-mcp
+    platform: linux/amd64          # SAP NWRFC SDK is x86-64 only
+    ports:
+      - "8000:8000"                # host:container — change the host port if 8000 is taken
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      MCP_PATH: /mcp
+      SAP_COUNTRIES_FILE: /app/countries.json
+    volumes:
+      # Per-country SAP config — each code is served at /mcp/{code}.
+      # Copy countries.sample.json -> countries.json and fill in real values.
+      - ./countries.json:/app/countries.json:ro
+    restart: unless-stopped

@@ -83,9 +83,136 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 Restart Claude Desktop and the 17 tools will appear.
 
+## Hosting over HTTP (remote access by URL)
+
+By default the server uses **stdio** (local subprocess). To make it reachable by
+URL from other machines, run it with the **streamable-http** transport:
+
+```bash
+MCP_TRANSPORT=streamable-http \
+MCP_HOST=0.0.0.0 \
+MCP_PORT=8000 \
+SAP_MOCK_MODE=true \
+uv run sap-mcp
+```
+
+In HTTP mode the server is **multi-country**: it serves one MCP instance per
+country at `http://<server-ip>:8000/mcp/{country_code}`, each with its own SAP
+connection (see [Per-country routing](#per-country-routing) below).
+
+### Per-country routing
+
+Each country has a different SAP system, so connection settings are supplied via
+a JSON file (mounted as a volume in Docker, path set by `SAP_COUNTRIES_FILE`,
+default `/app/countries.json`). Copy the sample and edit it:
+
+```bash
+cp countries.sample.json countries.json
+```
+
+```json
+{
+  "my": { "ashost": "sap-my.company.com", "client": "100", "user": "RFC_USER", "passwd": "...", "mock_mode": false },
+  "th": { "ashost": "sap-th.company.com", "client": "200", "user": "RFC_USER", "passwd": "...", "mock_mode": false },
+  "id": { "ashost": "sap-id.company.com", "client": "300", "user": "RFC_USER", "passwd": "...", "mock_mode": false }
+}
+```
+
+Per-country fields: `ashost`, `sysnr`, `client`, `user`, `passwd`, `lang`,
+`mock_mode`, `connection_pool_size` (missing fields fall back to defaults). Each
+code is then served at its own URL with an isolated connection pool:
+
+| Endpoint | SAP system |
+|----------|------------|
+| `GET  /healthz` | health + list of served countries |
+| `POST /mcp/my` | Malaysia |
+| `POST /mcp/th` | Thailand |
+| `POST /mcp/id` | Indonesia |
+
+An unknown country code returns `404`. A request to `/mcp/id` can only ever reach
+the Indonesia SAP system — no cross-country leakage.
+
+> If `countries.json` is absent, the server falls back to a single `default`
+> system built from the `SAP_*` env vars (served at `/mcp/default`).
+
+### Run with Docker
+
+```bash
+cp countries.sample.json countries.json   # then edit per-country SAP settings
+
+# docker-compose.yml runs the published image karunais13/sap-rfc-mcp:latest
+docker compose up -d
+
+docker compose pull         # update to the latest image
+docker compose logs -f      # view logs
+docker compose down         # stop
+```
+
+To build the image from source instead of pulling, use the `Dockerfile`
+directly: `docker build --platform linux/amd64 -t sap-rfc-mcp .`
+
+Endpoints: `http://<server-ip>:8000/mcp/{country_code}` and `/healthz`.
+
+### Connecting a client to the URL
+
+An MCP client that supports HTTP transport points at the country URL, e.g. a
+Claude Desktop / Claude Code config:
+
+```json
+{
+  "mcpServers": {
+    "sap-my": { "type": "http", "url": "http://<server-ip>:8000/mcp/my" },
+    "sap-th": { "type": "http", "url": "http://<server-ip>:8000/mcp/th" },
+    "sap-id": { "type": "http", "url": "http://<server-ip>:8000/mcp/id" }
+  }
+}
+```
+
+### Behind a reverse proxy
+
+The proxy forwards `/mcp/` to the container **without rewriting the path** so the
+app can dispatch by country code. A sample nginx config is in
+[`nginx.sample.conf`](nginx.sample.conf) — it preserves the path, disables
+buffering (so SSE streams through), and has commented hooks for TLS + auth.
+
+> **Security:** the HTTP server is **unauthenticated** and binds to `0.0.0.0`.
+> Only expose it on a trusted network, or put it behind a reverse proxy (nginx,
+> Caddy, Traefik) that adds TLS and an auth layer before opening it to the internet.
+
+### Live SAP in Docker
+
+The Docker image **bundles the SAP NWRFC SDK and PyRFC**, so it can connect to a
+real SAP system — it just defaults to mock mode so it boots with no config.
+
+Requirements:
+- Place the SAP NWRFC SDK 7.50 **Linux x86-64** tarball at `nwrfcsdk.tar.gz` in
+  the repo root before building (it extracts to a top-level `nwrfcsdk/` dir).
+  This file is license-restricted and git-ignored — do not commit it.
+- The image is **amd64-only** (the SDK has no arm64 build). On Apple Silicon it
+  builds/runs under emulation; `docker compose` already pins `linux/amd64`.
+
+Switch to live SAP per country by setting `"mock_mode": false` and the real
+connection fields in `countries.json` (see [Per-country routing](#per-country-routing)),
+then restart the container. Credentials live in that file, not in compose.
+
+The PyRFC version is pinned via the `PYRFC_VERSION` build arg (default `v3.3.1`).
+
 ## Configuration
 
-All settings use the `SAP_` env prefix and can be set via `.env` file or environment variables:
+### Transport / HTTP settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | `stdio` | `stdio` for local clients, `streamable-http` for URL access |
+| `MCP_HOST` | `0.0.0.0` | Bind address for HTTP transport |
+| `MCP_PORT` | `8000` | Port for HTTP transport |
+| `MCP_PATH` | `/mcp` | Base URL path; countries are served at `{MCP_PATH}/{code}` |
+| `SAP_COUNTRIES_FILE` | `/app/countries.json` | Per-country SAP config (HTTP mode) |
+
+### SAP settings (stdio mode / fallback)
+
+In stdio mode (and as the fallback when no countries file exists) settings use
+the `SAP_` env prefix and can be set via `.env` file or environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|

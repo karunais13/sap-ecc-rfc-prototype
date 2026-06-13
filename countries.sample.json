@@ -1,0 +1,32 @@
+{
+  "my": {
+    "ashost": "sap-my.company.com",
+    "sysnr": "00",
+    "client": "100",
+    "user": "RFC_USER",
+    "passwd": "change-me",
+    "lang": "EN",
+    "mock_mode": true,
+    "connection_pool_size": 5
+  },
+  "th": {
+    "ashost": "sap-th.company.com",
+    "sysnr": "00",
+    "client": "200",
+    "user": "RFC_USER",
+    "passwd": "change-me",
+    "lang": "EN",
+    "mock_mode": true,
+    "connection_pool_size": 5
+  },
+  "id": {
+    "ashost": "sap-id.company.com",
+    "sysnr": "00",
+    "client": "300",
+    "user": "RFC_USER",
+    "passwd": "change-me",
+    "lang": "EN",
+    "mock_mode": true,
+    "connection_pool_size": 5
+  }
+}
