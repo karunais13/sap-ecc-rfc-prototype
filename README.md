@@ -4,7 +4,7 @@ A Python [MCP](https://modelcontextprotocol.io) server that exposes SAP ECC BAPI
 
 Includes a full **mock mode** for development and testing without a live SAP system.
 
-## Tools (17)
+## Tools (18)
 
 ### Master Data (read-only)
 | Tool | BAPI | Description |
@@ -42,6 +42,11 @@ Includes a full **mock mode** for development and testing without a live SAP sys
 | `describe_rfc` | `get_function_description` | Get FM parameter signature |
 | `call_rfc` | *(any)* | Call any RFC-enabled FM dynamically |
 | `read_table` | `RFC_READ_TABLE` | Read any SAP table with filters |
+
+### Source Code
+| Tool | RFC | Description |
+|------|-----|-------------|
+| `read_source` | `ZRFC_READ_SOURCE` | Read ABAP source of a program, include, or function module (auto-detects type; needs S_DEVELOP display authorization) |
 
 ## Quick Start
 
@@ -280,6 +285,7 @@ src/sap_mcp/
 │   └── transaction.py     # COMMIT/ROLLBACK on same connection
 └── tools/
     ├── generic_rfc.py     # describe_rfc, call_rfc, read_table
+    ├── source_code.py     # read_source (ZRFC_READ_SOURCE)
     ├── master_data.py     # Materials, customers, vendors
     ├── sales.py           # Sales orders (read + create + change)
     ├── purchasing.py      # Purchase orders (read + create)

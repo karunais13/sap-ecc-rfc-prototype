@@ -17,7 +17,14 @@ from mcp.server.fastmcp import FastMCP
 
 from sap_mcp.config import load_countries
 from sap_mcp.connection.manager import ConnectionManager
-from sap_mcp.tools import generic_rfc, invoices, master_data, purchasing, sales
+from sap_mcp.tools import (
+    generic_rfc,
+    invoices,
+    master_data,
+    purchasing,
+    sales,
+    source_code,
+)
 
 TRANSPORT = os.getenv("MCP_TRANSPORT", "stdio")
 HOST = os.getenv("MCP_HOST", "0.0.0.0")
@@ -29,6 +36,8 @@ _INSTRUCTIONS = (
     "Use master data tools to look up materials, customers, and vendors. "
     "Use sales/purchasing tools to read or create orders. "
     "Use read_table to query any SAP table, and call_rfc for any function module. "
+    "Use read_source to read the ABAP source code of a program, include, or "
+    "function module. "
     "Numbers are automatically padded with leading zeros where needed."
 )
 
@@ -47,6 +56,7 @@ def _build_mcp(name: str, pool: ConnectionManager, streamable_http_path: str) ->
     sales.register(mcp, pool)
     purchasing.register(mcp, pool)
     invoices.register(mcp, pool)
+    source_code.register(mcp, pool)
     return mcp
 
 

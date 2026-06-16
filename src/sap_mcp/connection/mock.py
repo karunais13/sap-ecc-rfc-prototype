@@ -512,6 +512,47 @@ def _handle_invoice_getlist(**params: object) -> dict:
     return {"INVOICELIST": _MOCK_INVOICES, "RETURN": _success_return()}
 
 
+_MOCK_SOURCE = {
+    "Z_HELLO_WORLD": {
+        "object_type": "PROG",
+        "read_name": "Z_HELLO_WORLD",
+        "lines": [
+            "REPORT z_hello_world.",
+            "WRITE: / 'Hello, World!'.",
+        ],
+    },
+    "ZRFC_READ_SOURCE": {
+        "object_type": "FUNC",
+        "read_name": "LZ_DEV_TOOLSU01",
+        "lines": [
+            "FUNCTION zrfc_read_source.",
+            "  READ REPORT lv_prog INTO et_source.",
+            "ENDFUNCTION.",
+        ],
+    },
+}
+
+
+class _ABAPNotFound(Exception):
+    """Mimics pyrfc's ABAPApplicationError for a NOT_FOUND exception."""
+
+    key = "NOT_FOUND"
+
+
+def _handle_read_source(**params: object) -> dict:
+    name = str(params.get("IV_NAME", "")).upper()
+    entry = _MOCK_SOURCE.get(name)
+    if not entry:
+        raise _ABAPNotFound(f"Object {name} not found")
+    lines = entry["lines"]
+    return {
+        "EV_OBJECT_TYPE": entry["object_type"],
+        "EV_READ_NAME": entry["read_name"],
+        "EV_LINES": len(lines),
+        "ET_SOURCE": [{"LINE": line} for line in lines],
+    }
+
+
 _FUNCTION_HANDLERS: dict[str, object] = {
     "BAPI_MATERIAL_GET_DETAIL": _handle_material_get_detail,
     "BAPI_MATERIAL_GETLIST": _handle_material_getlist,
@@ -530,6 +571,7 @@ _FUNCTION_HANDLERS: dict[str, object] = {
     "BAPI_TRANSACTION_ROLLBACK": _handle_bapi_transaction_rollback,
     "RFC_READ_TABLE": _handle_rfc_read_table,
     "BAPI_INCOMINGINVOICE_GETLIST": _handle_invoice_getlist,
+    "ZRFC_READ_SOURCE": _handle_read_source,
 }
 
 

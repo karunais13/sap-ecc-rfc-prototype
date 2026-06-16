@@ -173,6 +173,55 @@ class TestInvoiceTools:
         assert result["INVOICELIST"][0]["NET_VALUE"] == "15000.00"
 
 
+class TestSourceCodeTools:
+
+    def test_read_source_program(self):
+        with pool.acquire() as conn:
+            result = conn.call("ZRFC_READ_SOURCE", IV_NAME="Z_HELLO_WORLD", IV_TYPE="AUTO")
+        assert result["EV_OBJECT_TYPE"] == "PROG"
+        assert result["EV_READ_NAME"] == "Z_HELLO_WORLD"
+        assert result["EV_LINES"] == 2
+        assert result["ET_SOURCE"][0]["LINE"] == "REPORT z_hello_world."
+
+    def test_read_source_function(self):
+        with pool.acquire() as conn:
+            result = conn.call("ZRFC_READ_SOURCE", IV_NAME="ZRFC_READ_SOURCE", IV_TYPE="AUTO")
+        assert result["EV_OBJECT_TYPE"] == "FUNC"
+        assert result["EV_READ_NAME"] == "LZ_DEV_TOOLSU01"
+
+    def test_read_source_not_found_raises(self):
+        with pytest.raises(Exception) as exc_info:
+            with pool.acquire() as conn:
+                conn.call("ZRFC_READ_SOURCE", IV_NAME="ZZ_DOES_NOT_EXIST", IV_TYPE="AUTO")
+        assert getattr(exc_info.value, "key", "") == "NOT_FOUND"
+
+    def test_read_source_tool_wrapper(self):
+        from mcp.server.fastmcp import FastMCP
+
+        from sap_mcp.tools.source_code import register
+
+        captured = {}
+
+        class _Recorder(FastMCP):
+            def tool(self, *args, **kwargs):
+                def deco(fn):
+                    captured[fn.__name__] = fn
+                    return fn
+                return deco
+
+        register(_Recorder("test"))
+        read_source = captured["read_source"]
+
+        result = read_source("Z_HELLO_WORLD")
+        assert result["object_type"] == "PROG"
+        assert result["line_count"] == 2
+        assert "Hello, World!" in result["source"]
+        assert result["lines"][0] == "REPORT z_hello_world."
+
+        missing = read_source("ZZ_DOES_NOT_EXIST")
+        assert "error" in missing
+
+
 class TestTransactionHandling:
 
     def test_commit(self):
