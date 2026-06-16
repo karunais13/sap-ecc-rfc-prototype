@@ -48,6 +48,12 @@ Includes a full **mock mode** for development and testing without a live SAP sys
 |------|-----|-------------|
 | `read_source` | `ZRFC_READ_SOURCE` | Read ABAP source of a program, include, or function module (auto-detects type; needs S_DEVELOP display authorization) |
 
+> ⚠️ **Custom RFC required.** Unlike the standard BAPIs above, `ZRFC_READ_SOURCE`
+> is **not** shipped by SAP — it is a custom, RFC-enabled function module you must
+> create in **every** target SAP system before `read_source` works. See
+> [Custom RFC: `ZRFC_READ_SOURCE`](#custom-rfc-zrfc_read_source) for the ABAP source
+> and setup steps.
+
 ## Quick Start
 
 ### Prerequisites
@@ -310,6 +316,133 @@ An AI agent can combine tools to implement business logic. For example, checking
 5. **`create_purchase_order()`** — Create and commit a PO for the reorder
 
 This flow is fully tested in `tests/test_stock_reorder_flow.py`.
+
+## Custom RFC: `ZRFC_READ_SOURCE`
+
+The `read_source` tool depends on a **custom** function module that is **not**
+delivered by SAP. You must create it once in **every** SAP system you point the
+server at (per country in `countries.json`) before `read_source` will work —
+otherwise calls fail with a `FU_NOT_FOUND` / "function module not found" error.
+
+### Setup
+
+1. In **SE37**, create function module `ZRFC_READ_SOURCE` (assign it to a
+   customer function group, e.g. `ZRFC`).
+2. On the **Attributes** tab, set the processing type to **Remote-Enabled
+   Module** (required for RFC).
+3. Define the interface exactly as below (Import / Export / Tables), then paste
+   the source and activate.
+4. Add the exceptions `NOT_FOUND` and `NOT_AUTHORIZED` on the **Exceptions** tab.
+5. Make sure the RFC/service user has **`S_DEVELOP`** with **`ACTVT = 03`**
+   (display) for the objects you want to read, or the FM raises `NOT_AUTHORIZED`.
+
+> Security note: this FM exposes ABAP source code over RFC. Restrict it to a
+> dedicated, least-privilege service user and treat read access accordingly.
+
+### ABAP source
+
+```abap
+FUNCTION ZRFC_READ_SOURCE.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_NAME) TYPE  SOBJ_NAME OPTIONAL
+*"     VALUE(IV_TYPE) TYPE  TROBJTYPE DEFAULT 'AUTO'
+*"  EXPORTING
+*"     VALUE(EV_OBJECT_TYPE) TYPE  TROBJTYPE
+*"     VALUE(EV_READ_NAME) TYPE  PROGRAMM
+*"     VALUE(EV_LINES) TYPE  I
+*"  TABLES
+*"      ET_SOURCE STRUCTURE  ABAPTXT255 OPTIONAL
+*"  EXCEPTIONS
+*"      NOT_FOUND
+*"      NOT_AUTHORIZED
+*"----------------------------------------------------------------------
+  DATA: lv_funcname TYPE rs38l-name,
+        lv_include  TYPE rs38l-include,
+        lv_group    TYPE rs38l-area,
+        lv_prog     TYPE programm,
+        lv_type     TYPE trobjtype.
+
+  REFRESH et_source.
+  lv_type = iv_type.
+  TRANSLATE lv_type TO UPPER CASE.
+
+* --- Auto-detect: is it a function module? ---------------------------
+  IF lv_type = 'AUTO'.
+    lv_funcname = iv_name.
+    CALL FUNCTION 'FUNCTION_EXISTS'
+      EXPORTING
+        funcname           = lv_funcname
+      IMPORTING
+        group              = lv_group
+        include            = lv_include
+      EXCEPTIONS
+        function_not_exist = 1
+        OTHERS             = 2.
+    IF sy-subrc = 0.
+      lv_type = 'FUNC'.
+    ELSE.
+      lv_type = 'PROG'.
+    ENDIF.
+  ENDIF.
+
+* --- Work out which report/include actually holds the code -----------
+  CASE lv_type.
+    WHEN 'FUNC'.
+      IF lv_include IS INITIAL.
+        lv_funcname = iv_name.
+        CALL FUNCTION 'FUNCTION_EXISTS'
+          EXPORTING
+            funcname           = lv_funcname
+          IMPORTING
+            group              = lv_group
+            include            = lv_include
+          EXCEPTIONS
+            function_not_exist = 1
+            OTHERS             = 2.
+        IF sy-subrc <> 0.
+          RAISE not_found.
+        ENDIF.
+      ENDIF.
+      lv_prog = lv_include.
+
+      AUTHORITY-CHECK OBJECT 'S_DEVELOP'
+        ID 'DEVCLASS' DUMMY
+        ID 'OBJTYPE'  FIELD 'FUGR'
+        ID 'OBJNAME'  FIELD lv_group
+        ID 'P_GROUP'  DUMMY
+        ID 'ACTVT'    FIELD '03'.
+      IF sy-subrc <> 0.
+        RAISE not_authorized.
+      ENDIF.
+
+    WHEN OTHERS.            "PROG / include
+      lv_prog = iv_name.
+
+      AUTHORITY-CHECK OBJECT 'S_DEVELOP'
+        ID 'DEVCLASS' DUMMY
+        ID 'OBJTYPE'  FIELD 'PROG'
+        ID 'OBJNAME'  FIELD lv_prog
+        ID 'P_GROUP'  DUMMY
+        ID 'ACTVT'    FIELD '03'.
+      IF sy-subrc <> 0.
+        RAISE not_authorized.
+      ENDIF.
+  ENDCASE.
+
+* --- Read the source -------------------------------------------------
+  READ REPORT lv_prog INTO et_source.   "add STATE 'I' to read inactive
+  IF sy-subrc <> 0.
+    RAISE not_found.
+  ENDIF.
+
+  ev_object_type = lv_type.
+  ev_read_name   = lv_prog.
+  DESCRIBE TABLE et_source LINES ev_lines.
+
+ENDFUNCTION.
+```
 
 ## License
 
