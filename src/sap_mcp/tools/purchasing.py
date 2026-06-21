@@ -10,6 +10,7 @@ from sap_mcp.bapi.return_handler import parse_return
 from sap_mcp.bapi.transaction import execute_bapi_with_commit
 from sap_mcp.connection.manager import pool as default_pool
 from sap_mcp.connection.manager import ConnectionManager
+from sap_mcp.tools.master_data import _pad_material
 
 
 def _pad_po(number: str) -> str:
@@ -35,8 +36,8 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         if not bapi.success:
             return {"error": bapi.summary}
         return {
-            "header": result.get("PO_HEADER", {}),
-            "items": result.get("PO_ITEMS", []),
+            "header": result.get("POHEADER", {}),
+            "items": result.get("POITEM", []),
         }
 
     @mcp.tool()
@@ -59,10 +60,7 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         if vendor_number:
             params["VENDOR"] = vendor_number.zfill(10)
         if date_from:
-            params["DOC_DATE_FROM"] = date_from
-        if date_to:
-            params["DOC_DATE_TO"] = date_to
-
+            params["DOC_DATE"] = date_from     # BAPI supports an exact date only
         with pool.acquire() as conn:
             result = conn.call("BAPI_PO_GETITEMS", **params)
         items = result.get("PO_ITEMS", [])
@@ -106,7 +104,7 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         for i, item in enumerate(items):
             itm: dict[str, Any] = {
                 "PO_ITEM": str((i + 1) * 10).zfill(5),
-                "MATERIAL": item["material"].zfill(18),
+                "MATERIAL": _pad_material(item["material"]),
                 "QUANTITY": str(item["quantity"]),
                 "PLANT": item["plant"],
             }

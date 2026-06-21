@@ -6,6 +6,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from sap_mcp.bapi.table import query_table
 from sap_mcp.connection.manager import pool as default_pool
 from sap_mcp.connection.manager import ConnectionManager
 
@@ -23,19 +24,28 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
             Dictionary with function name and list of parameters including
             name, direction, type, length, and description.
         """
-        with pool.acquire() as conn:
-            desc = conn.get_function_description(function_name)
-            params = []
-            for p in desc.parameters:
-                params.append({
+        try:
+            with pool.acquire() as conn:
+                desc = conn.get_function_description(function_name)
+                params = [{
                     "name": p["name"] if isinstance(p, dict) else p.name,
                     "direction": p["direction"] if isinstance(p, dict) else p.direction,
                     "parameter_type": p["parameter_type"] if isinstance(p, dict) else p.parameter_type,
                     "optional": p["optional"] if isinstance(p, dict) else p.optional,
                     "parameter_text": p["parameter_text"] if isinstance(p, dict) else p.parameter_text,
                     "default_value": p["default_value"] if isinstance(p, dict) else p.default_value,
-                })
-            return {"function_name": desc.name, "parameters": params}
+                } for p in desc.parameters]
+                return {"function_name": desc.name, "parameters": params}
+        except Exception as exc:
+            # Fallback: read the FM parameter dictionary directly (avoids pyrfc metadata bug)
+            with pool.acquire() as conn:
+                rows = query_table(
+                    conn, "FUPARAREF",
+                    ["PARAMETER", "PARAMTYPE", "STRUCTURE", "OPTIONAL", "DEFAULTVAL"],
+                    [f"FUNCNAME = '{function_name.upper()}'"], max_rows=200,
+                )
+            return {"function_name": function_name, "source": "FUPARAREF",
+                    "warning": f"pyrfc describe failed: {exc}", "parameters": rows}
 
     @mcp.tool()
     def call_rfc(function_name: str, parameters: dict[str, Any] | None = None) -> dict:
@@ -73,35 +83,12 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         Returns:
             Dictionary with 'fields' (list of field info) and 'rows' (list of dicts).
         """
-        params: dict[str, Any] = {
-            "QUERY_TABLE": table_name,
-            "DELIMITER": delimiter,
-            "ROWCOUNT": max_rows,
-        }
-
-        if fields:
-            params["FIELDS"] = [{"FIELDNAME": f} for f in fields]
-
-        if where_clauses:
-            params["OPTIONS"] = [{"TEXT": clause} for clause in where_clauses]
-
         with pool.acquire() as conn:
-            result = conn.call("RFC_READ_TABLE", **params)
+            rows = query_table(
+                conn, table_name, fields, where_clauses, max_rows, delimiter,
+            )
 
-        # Parse pipe-delimited output into dicts
-        field_info = result.get("FIELDS", [])
-        field_names = [f["FIELDNAME"] for f in field_info]
-        data_rows = result.get("DATA", [])
-
-        rows = []
-        for row in data_rows:
-            wa = row.get("WA", "")
-            values = [v.strip() for v in wa.split(delimiter)]
-            row_dict = {}
-            for i, fname in enumerate(field_names):
-                row_dict[fname] = values[i] if i < len(values) else ""
-            rows.append(row_dict)
-
+        field_names = list(rows[0].keys()) if rows else (fields or [])
         return {
             "table": table_name,
             "fields": field_names,

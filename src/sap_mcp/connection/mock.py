@@ -44,6 +44,17 @@ _MOCK_MATERIALS = {
         "GROSS_WEIGHT": "27.000",
         "UNIT_OF_WT": "KG",
     },
+    # Alphanumeric (lexical) material number: stored un-padded, UPPERCASE.
+    "CC132": {
+        "MATERIAL": "CC132",
+        "MATL_DESC": "1L 811-2573 ECO 100 ORGANIC YELLOW A",
+        "MATL_TYPE": "ZCCM",
+        "MATL_GROUP": "100",
+        "BASE_UOM": "EA",
+        "NET_WEIGHT": "1.000",
+        "GROSS_WEIGHT": "1.200",
+        "UNIT_OF_WT": "KG",
+    },
 }
 
 _MOCK_CUSTOMERS = {
@@ -206,6 +217,29 @@ _MOCK_TABLES = {
         "rows": [
             ["0000010001", "TA", "0000001000", "PO-ACME-001", "20250101", "15000.00", "EUR"],
             ["0000010002", "TA", "0000002000", "PO-TP-042", "20250115", "750.00", "EUR"],
+        ],
+    },
+    "VBAP": {
+        "fields": ["VBELN", "POSNR", "MATNR", "ARKTX", "KWMENG", "VRKME",
+                   "NETWR", "WERKS", "PSTYV", "ABGRU"],
+        "rows": [
+            ["0000010001", "000010", "000000000000001000", "Electric Motor 5kW",
+             "10.000", "EA", "15000.00", "1000", "TAN", ""],
+            ["0000010002", "000010", "000000000000000100", "Steel Rod 10mm",
+             "500.000", "KG", "750.00", "1000", "TAN", ""],
+        ],
+    },
+    "VBRK": {
+        "fields": ["VBELN", "FKART", "FKDAT", "KUNAG", "NETWR", "MWSBK", "WAERK", "VBTYP"],
+        "rows": [
+            ["9000000001", "F2", "20250115", "0000001000", "15000.00", "2850.00", "EUR", "M"],
+        ],
+    },
+    "VBRP": {
+        "fields": ["VBELN", "POSNR", "AUBEL", "MATNR", "ARKTX", "FKIMG", "NETWR"],
+        "rows": [
+            ["9000000001", "000010", "0000010001", "000000000000001000",
+             "Electric Motor 5kW", "10.000", "15000.00"],
         ],
     },
     "EKKO": {
@@ -418,17 +452,17 @@ def _handle_po_getdetail1(**params: object) -> dict:
     for po in _MOCK_PURCHASE_ORDERS:
         if po["PO_NUMBER"] == po_num:
             return {
-                "PO_HEADER": {
+                "POHEADER": {
                     "PO_NUMBER": po["PO_NUMBER"],
                     "DOC_TYPE": po["DOC_TYPE"],
                     "VENDOR": po["VENDOR"],
                     "DOC_DATE": po["DOC_DATE"],
                     "CURRENCY": po["CURRENCY"],
                 },
-                "PO_ITEMS": po["ITEMS"],
+                "POITEM": po["ITEMS"],
                 "RETURN": [_success_return()],
             }
-    return {"PO_HEADER": {}, "PO_ITEMS": [], "RETURN": [_error_return(f"PO {po_num} not found")]}
+    return {"POHEADER": {}, "POITEM": [], "RETURN": [_error_return(f"PO {po_num} not found")]}
 
 
 def _handle_po_getitems(**params: object) -> dict:

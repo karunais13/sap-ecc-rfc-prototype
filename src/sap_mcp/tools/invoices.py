@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from mcp.server.fastmcp import FastMCP
 
-from sap_mcp.bapi.return_handler import parse_return
+from sap_mcp.bapi.table import query_table
 from sap_mcp.connection.manager import pool as default_pool
 from sap_mcp.connection.manager import ConnectionManager
 
@@ -20,29 +18,28 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         date_to: str = "",
         reference_document: str = "",
     ) -> dict:
-        """Search for invoices by company code, date range, or reference document.
-
-        Args:
-            company_code: Company code (e.g. '1000')
-            date_from: Start date YYYYMMDD (optional)
-            date_to: End date YYYYMMDD (optional)
-            reference_document: Reference sales order number (optional)
-
-        Returns:
-            List of matching invoices.
-        """
-        params: dict[str, Any] = {}
-        if company_code:
-            params["COMP_CODE"] = company_code
-        if date_from:
-            params["DOC_DATE_FROM"] = date_from
-        if date_to:
-            params["DOC_DATE_TO"] = date_to
-        if reference_document:
-            params["REF_DOC"] = reference_document
-
+        """Search SD billing documents (invoices) by company code, date, or source order."""
         with pool.acquire() as conn:
-            result = conn.call("BAPI_INCOMINGINVOICE_GETLIST", **params)
-        bapi = parse_return(result.get("RETURN"))
-        invoices = result.get("INVOICELIST", [])
-        return {"invoices": invoices, "count": len(invoices)}
+            # reference_document = the originating sales order -> resolve via VBRP-AUBEL
+            if reference_document:
+                items = query_table(
+                    conn, "VBRP",
+                    ["VBELN", "POSNR", "AUBEL", "MATNR", "ARKTX", "FKIMG", "NETWR"],
+                    [f"AUBEL = '{reference_document.zfill(10)}'"],
+                )
+                return {"invoices": items, "count": len(items)}
+
+            where = []
+            if company_code:
+                where.append(f"BUKRS = '{company_code}'")
+            if date_from and date_to:
+                where.append(f"FKDAT >= '{date_from}' AND FKDAT <= '{date_to}'")
+            elif date_from:
+                where.append(f"FKDAT >= '{date_from}'")
+            headers = query_table(
+                conn, "VBRK",
+                ["VBELN", "FKART", "FKDAT", "KUNAG", "NETWR", "MWSBK", "WAERK", "VBTYP"],
+                [" AND ".join(where)] if where else None,
+                max_rows=200,
+            )
+        return {"invoices": headers, "count": len(headers)}

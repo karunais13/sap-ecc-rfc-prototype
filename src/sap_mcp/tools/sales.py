@@ -7,9 +7,11 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from sap_mcp.bapi.return_handler import parse_return
+from sap_mcp.bapi.table import query_table
 from sap_mcp.bapi.transaction import execute_bapi_with_commit
 from sap_mcp.connection.manager import pool as default_pool
 from sap_mcp.connection.manager import ConnectionManager
+from sap_mcp.tools.master_data import _pad_material
 
 
 def _pad_doc(number: str) -> str:
@@ -20,24 +22,24 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
 
     @mcp.tool()
     def get_sales_order(sales_order_number: str) -> dict:
-        """Read a sales order header and line items.
-
-        Args:
-            sales_order_number: SAP sales document number
-
-        Returns:
-            Sales order header and items.
-        """
-        padded = _pad_doc(sales_order_number)
+        """Read a sales order header (VBAK) and items (VBAP)."""
+        vbeln = sales_order_number.zfill(10)
         with pool.acquire() as conn:
-            result = conn.call("BAPI_SALESORDER_GETDETAIL", SALESDOCUMENT=padded)
-        bapi = parse_return(result.get("RETURN"))
-        if not bapi.success:
-            return {"error": bapi.summary}
-        return {
-            "header": result.get("ORDER_HEADER_IN", {}),
-            "items": result.get("ORDER_ITEMS_IN", []),
-        }
+            header = query_table(
+                conn, "VBAK",
+                ["VBELN", "AUART", "ERDAT", "KUNNR", "NETWR", "WAERK",
+                 "VKORG", "VTWEG", "SPART", "BSTNK"],
+                [f"VBELN = '{vbeln}'"],
+            )
+            items = query_table(
+                conn, "VBAP",
+                ["VBELN", "POSNR", "MATNR", "ARKTX", "KWMENG", "VRKME",
+                 "NETWR", "WERKS", "PSTYV", "ABGRU"],
+                [f"VBELN = '{vbeln}'"], max_rows=200,
+            )
+        if not header:
+            return {"error": f"Sales order {vbeln} not found in VBAK"}
+        return {"header": header[0], "items": items}
 
     @mcp.tool()
     def search_sales_orders(
@@ -109,7 +111,7 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         for i, item in enumerate(items):
             itm = {
                 "ITM_NUMBER": str((i + 1) * 10).zfill(6),
-                "MATERIAL": item["material"].zfill(18),
+                "MATERIAL": _pad_material(item["material"]),
                 "TARGET_QTY": str(item["quantity"]),
             }
             if "plant" in item:
@@ -171,7 +173,7 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
                     itm["TARGET_QTY"] = str(item["quantity"])
                     itm_x["TARGET_QTY"] = "X"
                 if "material" in item:
-                    itm["MATERIAL"] = item["material"].zfill(18)
+                    itm["MATERIAL"] = _pad_material(item["material"])
                     itm_x["MATERIAL"] = "X"
                 order_items.append(itm)
                 order_items_x.append(itm_x)

@@ -5,12 +5,20 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from sap_mcp.bapi.return_handler import parse_return
+from sap_mcp.bapi.table import query_table
 from sap_mcp.connection.manager import pool as default_pool
 from sap_mcp.connection.manager import ConnectionManager
 
 
 def _pad_material(number: str) -> str:
-    return number.zfill(18)
+    """Format a material number for SAP internal use.
+
+    Numeric material numbers are stored zero-padded to 18 chars; alphanumeric
+    (lexical) numbers are stored left-justified, UPPERCASE, with NO padding.
+    Blindly zfill-ing corrupts alphanumeric matnr (e.g. CC132 -> 0000000000000CC132).
+    """
+    n = number.strip().upper()
+    return n.zfill(18) if n.isdigit() else n
 
 
 def _pad_partner(number: str) -> str:
@@ -29,9 +37,13 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
         Returns:
             Material general data including description, type, unit of measure, weights.
         """
-        padded = _pad_material(material_number)
+        n = material_number.strip().upper()
+        if len(n) > 18:                       # S/4 long material number
+            kwargs = {"MATERIAL_LONG": n}
+        else:
+            kwargs = {"MATERIAL": _pad_material(n)}
         with pool.acquire() as conn:
-            result = conn.call("BAPI_MATERIAL_GET_DETAIL", MATERIAL=padded)
+            result = conn.call("BAPI_MATERIAL_GET_DETAIL", **kwargs)
         bapi = parse_return(result.get("RETURN"))
         if not bapi.success:
             return {"error": bapi.summary}
@@ -39,27 +51,28 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
 
     @mcp.tool()
     def search_materials(description: str = "", material_type: str = "") -> dict:
-        """Search for materials by description or type.
-
-        Args:
-            description: Material description search term
-            material_type: Material type (e.g. 'ROH' for raw, 'FERT' for finished)
-
-        Returns:
-            List of matching materials with number and description.
-        """
-        selection = []
-        if description:
-            selection.append({"SIGN": "I", "OPTION": "CP", "LOW": f"*{description}*"})
+        """Search materials by description (MAKT) and/or material type (MARA)."""
         with pool.acquire() as conn:
-            result = conn.call(
-                "BAPI_MATERIAL_GETLIST",
-                MATNR_RA=selection if selection else [],
-                MATERIAL_DESCRIPTION=description,
-            )
-        bapi = parse_return(result.get("RETURN"))
-        materials = result.get("MATNRLIST", [])
-        return {"materials": materials, "count": len(materials)}
+            if description:
+                rows = query_table(
+                    conn, "MAKT",
+                    ["MATNR", "MAKTX", "SPRAS"],
+                    [f"MAKTX LIKE '%{description.upper()}%' AND SPRAS = 'E'"],
+                    max_rows=50,
+                )
+            else:
+                rows = []
+            if material_type:
+                mat = query_table(
+                    conn, "MARA", ["MATNR", "MTART", "MEINS"],
+                    [f"MTART = '{material_type.upper()}'"], max_rows=50,
+                )
+                if description:                       # intersect by MATNR
+                    keep = {r["MATNR"] for r in mat}
+                    rows = [r for r in rows if r["MATNR"] in keep]
+                else:
+                    rows = mat
+        return {"materials": rows, "count": len(rows)}
 
     @mcp.tool()
     def get_customer(customer_number: str) -> dict:
@@ -81,19 +94,20 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
 
     @mcp.tool()
     def search_customers(name: str = "", city: str = "") -> dict:
-        """Search for customers by name or city.
-
-        Args:
-            name: Customer name search term
-            city: City search term
-
-        Returns:
-            List of matching customers with number, name, city, country.
-        """
+        """Search customers by name and/or city (KNA1; descriptions stored UPPERCASE)."""
+        where = []
+        if name:
+            where.append(f"NAME1 LIKE '%{name.upper()}%'")
+        if city:
+            where.append(f"ORT01 LIKE '%{city.upper()}%'")
         with pool.acquire() as conn:
-            result = conn.call("BAPI_CUSTOMER_GETLIST", NAME=name, CITY=city)
-        customers = result.get("ADDRESSDATA", [])
-        return {"customers": customers, "count": len(customers)}
+            rows = query_table(
+                conn, "KNA1",
+                ["KUNNR", "NAME1", "ORT01", "LAND1", "STCD1"],
+                [" AND ".join(where)] if where else None,
+                max_rows=50,
+            )
+        return {"customers": rows, "count": len(rows)}
 
     @mcp.tool()
     def get_vendor(vendor_number: str) -> dict:
@@ -115,15 +129,12 @@ def register(mcp: FastMCP, pool: ConnectionManager = default_pool) -> None:
 
     @mcp.tool()
     def search_vendors(name: str = "") -> dict:
-        """Search for vendors by name.
-
-        Args:
-            name: Vendor name search term
-
-        Returns:
-            List of matching vendors with number, name, city, country.
-        """
+        """Search vendors by name (LFA1; descriptions stored UPPERCASE)."""
+        where = [f"NAME1 LIKE '%{name.upper()}%'"] if name else None
         with pool.acquire() as conn:
-            result = conn.call("BAPI_VENDOR_GETLIST", NAME=name)
-        vendors = result.get("VENDORS", [])
-        return {"vendors": vendors, "count": len(vendors)}
+            rows = query_table(
+                conn, "LFA1",
+                ["LIFNR", "NAME1", "ORT01", "LAND1", "STCD1"],
+                where, max_rows=50,
+            )
+        return {"vendors": rows, "count": len(rows)}
